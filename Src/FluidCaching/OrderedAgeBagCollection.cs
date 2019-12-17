@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 
 namespace FluidCaching
 {
-    internal class OrderedAgeBagCollection<T> where T : class
+    internal class OrderedAgeBagCollection<T> : IEnumerable<AgeBag<T>> where T : class
     {
         private readonly AgeBag<T>[] bags;
 
@@ -56,6 +58,16 @@ namespace FluidCaching
                     node = next;
                 }
             }
+        }
+
+        public IEnumerator<AgeBag<T>> GetEnumerator()
+        {
+            return ((IEnumerable<AgeBag<T>>)bags).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return this.GetEnumerator();
         }
     }
 }

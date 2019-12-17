@@ -65,7 +65,7 @@ namespace FluidCaching
                     Node<T> newOrExistingNode = owner.TryAddAsNode(value);
                     value = newOrExistingNode.Value;
 
-                    lifespanManager.CheckValidity();
+                    await lifespanManager.CheckValidity();
                 }
             }
 
@@ -92,20 +92,24 @@ namespace FluidCaching
 
         /// <summary>Delete object that matches key from cache</summary>
         /// <param name="key"></param>
-        public void Remove(TKey key)
+        public async Task Remove(TKey key)
         {
             Node<T> node = FindExistingNodeByKey(key);
             if (node != null)
             {
+                bool needCheckValidity = false;
                 lock (syncObject)
                 {
                     node = FindExistingNodeByKey(key);
                     if (node != null)
                     {
                         node.RemoveFromCache();
-
-                        lifespanManager.CheckValidity();
+                        needCheckValidity = true;
                     }
+                }
+                if (needCheckValidity)
+                {
+                    await lifespanManager.CheckValidity();
                 }
             }
         }

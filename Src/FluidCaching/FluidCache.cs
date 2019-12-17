@@ -45,11 +45,15 @@ namespace FluidCaching
         /// <param name="validateCache">
         /// An optional delegate used to determine if cache is out of date. Is called before index access not more than once per 10 seconds
         /// </param>
-        public FluidCache(int capacity, TimeSpan minAge, TimeSpan maxAge, GetNow getNow, IsValid validateCache = null)
+        /// <param name="disposer">
+        /// An optional delegate used to perform final operations on a cachable item before dropping it from cache.
+        /// </param>
+        public FluidCache(int capacity, TimeSpan minAge, TimeSpan maxAge, GetNow getNow, IsValid validateCache = null, ItemDisposer<T> disposer = null)
         {
             lifeSpan = new LifespanManager<T>(this, capacity, minAge, maxAge, getNow)
             {
-                ValidateCache = validateCache
+                ValidateCache = validateCache,
+                Disposer = disposer,
             };
         }
 
@@ -167,14 +171,14 @@ namespace FluidCaching
         }
 
         /// <summary>Remove all items from cache</summary>
-        public void Clear()
+        public async Task Clear()
         {
             foreach (KeyValuePair<string, IIndexManagement<T>> keyValue in indexList)
             {
                 keyValue.Value.ClearIndex();
             }
 
-            lifeSpan.Clear();
+            await lifeSpan.Clear();
         }
     }
 }

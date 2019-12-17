@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace FluidCaching
 {
@@ -70,8 +71,10 @@ namespace FluidCaching
 
         public IsValid ValidateCache { get; set; }
 
+        public ItemDisposer<T> Disposer { get; set; }
+
         /// <summary>checks to see if cache is still valid and if LifespanMgr needs to do maintenance</summary>
-        public void CheckValidity()
+        public async Task CheckValidity()
         {
             // NOTE: Monitor.Enter(this) / Monitor.Exit(this) is the same as lock(this)... We are using Monitor.TryEnter() because it
             // does not wait for a lock, if lock is currently held then skip and let next Touch perform cleanup.
@@ -84,11 +87,11 @@ namespace FluidCaching
                         // if cache is no longer valid throw contents away and start over, else cleanup old items
                         if ((CurrentBagIndex > 1000000) || ((ValidateCache != null) && !ValidateCache()))
                         {
-                            owner.Clear();
+                            await owner.Clear();
                         }
                         else
                         {
-                            CleanUp(getNow());
+                            await CleanUp(getNow());
                         }
                     }
                 }
@@ -110,8 +113,9 @@ namespace FluidCaching
         /// an item from LifespanMgr allows it to be garbage collected. If removed item is retrieved by index prior 
         /// to GC then it will be readded to LifespanMgr.
         /// </remarks>
-        private void CleanUp(DateTime now)
+        private async Task CleanUp(DateTime now)
         {
+            var deletedObjects = (Disposer != null) ? new List<T>() : null;
             lock (syncObject)
             {
                 int itemsAboveCapacity = Stats.Current - Stats.Capacity;
@@ -119,7 +123,7 @@ namespace FluidCaching
 
                 while (!HasProcessedAllBags && (AlmostOutOfBags || BagNeedsCleaning(bag, itemsAboveCapacity, now)))
                 {
-                    itemsAboveCapacity = CleanBag(bag, itemsAboveCapacity);
+                    itemsAboveCapacity = CleanBag(bag, itemsAboveCapacity, deletedObjects);
 
                     ++OldestBagIndex;
                     bag = bags[OldestBagIndex];
@@ -130,9 +134,16 @@ namespace FluidCaching
 
                 EnsureIndexIsValid();
             }
+            if (deletedObjects != null)
+            {
+                foreach (var obj in deletedObjects)
+                {
+                    await Disposer(obj);
+                }
+            }
         }
 
-        private static int CleanBag(AgeBag<T> bag, int itemsAboveCapacity)
+        private static int CleanBag(AgeBag<T> bag, int itemsAboveCapacity, List<T> deletedObjects)
         {
             Node<T> node = bag.First;
             bag.First = null;
@@ -147,6 +158,10 @@ namespace FluidCaching
                     if (node.Bag == bag)
                     {
                         // item has not been touched since bag was closed, so remove it from LifespanMgr
+                        if (deletedObjects != null)
+                        {
+                            deletedObjects.Add(node.Value);
+                        }
                         --itemsAboveCapacity;
                         node.RemoveFromCache();
                     }
@@ -208,16 +223,46 @@ namespace FluidCaching
         }
 
         /// <summary>Remove all items from LifespanMgr and reset</summary>
-        public void Clear()
+        public async Task Clear()
         {
+            var deletedObjects = (Disposer != null) ? new List<T>() : null;
             lock (syncObject)
             {
-                bags.Empty();
+                if (deletedObjects != null)
+                {
+                    foreach (var bag in bags)
+                    {
+                        CollectInBag(bag, deletedObjects);
+                    }
+                }
 
+                bags.Empty();
                 Stats.Reset();
 
                 // reset age bags
                 OpenBag(OldestBagIndex = 0);
+            }
+            if (deletedObjects != null)
+            {
+                foreach (var obj in deletedObjects)
+                {
+                    await Disposer(obj);
+                }
+            }
+        }
+
+        private static void CollectInBag(AgeBag<T> bag, List<T> deletedObjects)
+        {
+            Node<T> node = bag.First;
+
+            while (node != null)
+            {
+                if (node.Value != null && node.Bag != null)
+                {
+                    deletedObjects.Add(node.Value);
+                }
+
+                node = node.Next;
             }
         }
 
